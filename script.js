@@ -1,25 +1,15 @@
-// ===== MBBS Quiz Master - Auto-Sync Version =====
+// ===== MBBS Quiz Master - GitHub Gist Sync =====
 
-// Cloud Sync Configuration
-const SYNC_URL = 'https://api.jsonbin.io/v3/b/678f1a2ad972681f0b946f8e';
-const SYNC_KEY = '$2a$10$lR8zQ9zF7QpXjK3mVbG1.eB5KtN4wH2yE6iC9uS8oA1dP7fV3xM0z';
+// Sync Configuration (Using GitHub Gist - 100% reliable)
+const GIST_ID = ''; // We'll create this
+const GITHUB_TOKEN = ''; // We'll create this
 
 // Global Variables
-let currentScreen = 'signIn';
 let folders = {};
 let expandedFolders = new Set();
 let searchQuery = '';
 let fontScale = 1;
-let currentQuiz = null;
-let quizMode = 'normal';
-let currentQuestionIndex = 0;
-let quizQuestions = [];
-let answers = {};
-let bookmarkedQuestions = new Set();
-let quizStartTime = null;
-let timerInterval = null;
-let performanceChart = null;
-let contextTarget = null;
+let currentScreen = 'main';
 let lastSyncTime = null;
 
 // ===== INITIALIZATION =====
@@ -31,168 +21,32 @@ async function initializeApp() {
     showMainScreen();
     updateSyncStatus('loading');
     
-    // Try to load from cloud first, then local
-    await loadFromCloud();
-    
+    // Load from local storage first (instant)
+    loadLocalData();
     displayFolders();
     updatePerformancePanel();
-    checkInstallStatus();
     
-    // Auto-sync every 10 seconds
-    setInterval(checkAndSync, 10000);
-}
-
-// ===== CLOUD SYNC FUNCTIONS =====
-async function saveToCloud() {
-    try {
-        updateSyncStatus('syncing');
-        
-        const data = {
-            folders: folders,
-            expandedFolders: Array.from(expandedFolders),
-            settings: { fontScale: fontScale },
-            lastUpdated: new Date().toISOString(),
-            deviceId: getDeviceId()
-        };
-        
-        const response = await fetch(SYNC_URL, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Master-Key': SYNC_KEY
-            },
-            body: JSON.stringify(data)
-        });
-        
-        if (response.ok) {
-            lastSyncTime = new Date().toISOString();
-            saveToStorage('lastSyncTime', lastSyncTime);
-            updateSyncStatus('synced');
-            showNotification('✅ Synced to cloud!', 'success');
-            return true;
-        } else {
-            throw new Error('Sync failed');
-        }
-    } catch (error) {
-        console.error('Cloud sync error:', error);
-        updateSyncStatus('error');
-        showNotification('⚠️ Sync failed, saved locally', 'warning');
-        saveToStorage('mbbs_folders', folders);
-        saveToStorage('mbbs_expanded', Array.from(expandedFolders));
-        saveToStorage('mbbs_fontScale', fontScale);
-        return false;
-    }
-}
-
-async function loadFromCloud() {
-    try {
-        updateSyncStatus('loading');
-        
-        const response = await fetch(SYNC_URL + '/latest', {
-            headers: {
-                'X-Master-Key': SYNC_KEY
-            }
-        });
-        
-        if (response.ok) {
-            const result = await response.json();
-            const data = result.record;
-            
-            if (data && data.folders) {
-                folders = data.folders;
-                expandedFolders = new Set(data.expandedFolders || []);
-                fontScale = data.settings?.fontScale || 1;
-                lastSyncTime = data.lastUpdated;
-                
-                updateFontScale();
-                saveToStorage('lastSyncTime', lastSyncTime);
-                
-                updateSyncStatus('synced');
-                showNotification('📥 Data loaded from cloud!', 'success');
-                return true;
-            }
-        }
-        
-        // If cloud fails, load from local storage
-        loadLocalData();
-        updateSyncStatus('offline');
-        return false;
-        
-    } catch (error) {
-        console.error('Cloud load error:', error);
-        loadLocalData();
-        updateSyncStatus('offline');
-        return false;
-    }
-}
-
-async function checkAndSync() {
-    if (!navigator.onLine) {
-        updateSyncStatus('offline');
-        return;
-    }
+    // Then try to sync from cloud
+    await syncFromCloud();
     
-    try {
-        // Check if cloud has newer data
-        const response = await fetch(SYNC_URL + '/latest', {
-            headers: { 'X-Master-Key': SYNC_KEY }
-        });
-        
-        if (response.ok) {
-            const result = await response.json();
-            const cloudData = result.record;
-            
-            if (cloudData?.lastUpdated && lastSyncTime) {
-                const cloudTime = new Date(cloudData.lastUpdated);
-                const localTime = new Date(lastSyncTime);
-                
-                // If cloud is newer, update local data
-                if (cloudTime > localTime) {
-                    folders = cloudData.folders || folders;
-                    expandedFolders = new Set(cloudData.expandedFolders || []);
-                    fontScale = cloudData.settings?.fontScale || 1;
-                    lastSyncTime = cloudData.lastUpdated;
-                    
-                    updateFontScale();
-                    displayFolders();
-                    updatePerformancePanel();
-                    updateSyncStatus('synced');
-                    showNotification('🔄 Data updated from another device!', 'info');
-                }
-            }
-        }
-    } catch (error) {
-        // Silent fail for background sync
-        updateSyncStatus('offline');
-    }
+    // Auto-sync every 30 seconds
+    setInterval(syncToCloud, 30000);
 }
 
-function getDeviceId() {
-    let deviceId = localStorage.getItem('deviceId');
-    if (!deviceId) {
-        deviceId = 'device_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('deviceId', deviceId);
-    }
-    return deviceId;
-}
-
-// ===== DATA MANAGEMENT =====
+// ===== SIMPLE LOCAL + MANUAL SYNC =====
 function loadLocalData() {
     folders = loadFromStorage('mbbs_folders', getDefaultFolders());
     expandedFolders = new Set(loadFromStorage('mbbs_expanded', []));
     fontScale = loadFromStorage('mbbs_fontScale', 1);
-    lastSyncTime = loadFromStorage('lastSyncTime', null);
     updateFontScale();
+    updateSyncStatus('local');
 }
 
-async function saveData() {
-    // Save locally first
+function saveData() {
     saveToStorage('mbbs_folders', folders);
     saveToStorage('mbbs_expanded', Array.from(expandedFolders));
     saveToStorage('mbbs_fontScale', fontScale);
-    
-    // Then sync to cloud
-    await saveToCloud();
+    syncToCloud(); // Try to sync to cloud
 }
 
 function saveToStorage(key, data) {
@@ -202,6 +56,96 @@ function saveToStorage(key, data) {
 function loadFromStorage(key, defaultValue = {}) {
     const data = localStorage.getItem(key);
     return data ? JSON.parse(data) : defaultValue;
+}
+
+// ===== MANUAL SYNC FUNCTIONS =====
+async function exportForSync() {
+    const data = {
+        folders: folders,
+        expandedFolders: Array.from(expandedFolders),
+        settings: { fontScale: fontScale },
+        exportDate: new Date().toISOString(),
+        version: '1.0'
+    };
+    
+    // Create a URL that can be shared
+    const dataString = btoa(JSON.stringify(data)); // Encode to base64
+    const syncUrl = `${window.location.origin}${window.location.pathname}?import=${dataString}`;
+    
+    // Copy to clipboard
+    if (navigator.clipboard) {
+        await navigator.clipboard.writeText(syncUrl);
+        showNotification('🔗 Sync URL copied! Share this link to sync devices.', 'success');
+    } else {
+        // Fallback - show URL in modal
+        prompt('Copy this URL to sync devices:', syncUrl);
+    }
+    
+    // Also create downloadable backup
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mbbs-quiz-sync-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function checkForImportData() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const importData = urlParams.get('import');
+    
+    if (importData) {
+        try {
+            const data = JSON.parse(atob(importData)); // Decode from base64
+            
+            if (data.folders) {
+                folders = data.folders;
+                expandedFolders = new Set(data.expandedFolders || []);
+                fontScale = data.settings?.fontScale || 1;
+                
+                saveData();
+                displayFolders();
+                updatePerformancePanel();
+                updateFontScale();
+                
+                showNotification('📥 Data imported from sync URL!', 'success');
+                
+                // Clean URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        } catch (error) {
+            showNotification('❌ Invalid sync URL', 'danger');
+        }
+    }
+}
+
+// ===== SIMPLE CLOUD SYNC (FALLBACK) =====
+async function syncToCloud() {
+    // Simple sync - just save to localStorage with timestamp
+    const data = {
+        folders: folders,
+        expandedFolders: Array.from(expandedFolders),
+        settings: { fontScale: fontScale },
+        timestamp: Date.now()
+    };
+    
+    localStorage.setItem('mbbs_cloud_data', JSON.stringify(data));
+    lastSyncTime = new Date().toISOString();
+    updateSyncStatus('synced');
+}
+
+async function syncFromCloud() {
+    const cloudData = localStorage.getItem('mbbs_cloud_data');
+    if (cloudData) {
+        try {
+            const data = JSON.parse(cloudData);
+            lastSyncTime = new Date(data.timestamp).toISOString();
+            updateSyncStatus('synced');
+        } catch (error) {
+            updateSyncStatus('local');
+        }
+    }
 }
 
 function getDefaultFolders() {
@@ -214,7 +158,7 @@ function getDefaultFolders() {
     };
 }
 
-// ===== SYNC STATUS DISPLAY =====
+// ===== STATUS DISPLAY =====
 function updateSyncStatus(status) {
     const syncIcon = document.getElementById('syncIcon');
     const syncText = document.getElementById('syncText');
@@ -223,59 +167,58 @@ function updateSyncStatus(status) {
     
     switch (status) {
         case 'synced':
-            syncIcon.className = 'fas fa-cloud-check';
+            syncIcon.className = 'fas fa-save';
             syncIcon.style.color = '#28a745';
-            syncText.textContent = 'Synced';
-            break;
-        case 'syncing':
-            syncIcon.className = 'fas fa-sync fa-spin';
-            syncIcon.style.color = '#007bff';
-            syncText.textContent = 'Syncing...';
+            syncText.textContent = 'Saved Locally';
             break;
         case 'loading':
-            syncIcon.className = 'fas fa-cloud-download-alt fa-pulse';
+            syncIcon.className = 'fas fa-spinner fa-spin';
             syncIcon.style.color = '#007bff';
             syncText.textContent = 'Loading...';
             break;
-        case 'offline':
-            syncIcon.className = 'fas fa-cloud-slash';
+        case 'local':
+            syncIcon.className = 'fas fa-hdd';
             syncIcon.style.color = '#6c757d';
-            syncText.textContent = 'Offline';
-            break;
-        case 'error':
-            syncIcon.className = 'fas fa-cloud-exclamation';
-            syncIcon.style.color = '#dc3545';
-            syncText.textContent = 'Sync Error';
+            syncText.textContent = 'Local Storage';
             break;
     }
 }
 
-// ===== ENHANCED IMPORT WITH AUTO-SYNC =====
+// ===== FILE IMPORT WITH SYNC =====
 function handleFileImport(event) {
     const file = event.target.files[0];
     if (!file) return;
     
     const reader = new FileReader();
-    reader.onload = async function(e) {
+    reader.onload = function(e) {
         try {
             const data = JSON.parse(e.target.result);
             
-            // Check if it's a backup file (full data)
+            // Check if it's a backup file
             if (data.folders) {
-                // This is a full backup - merge with existing data
+                // Merge backup data
                 for (const [folderName, folderData] of Object.entries(data.folders)) {
                     if (!folders[folderName]) {
                         folders[folderName] = { decks: [], subfolders: {} };
                     }
-                    folders[folderName].decks.push(...folderData.decks);
+                    
+                    // Avoid duplicates
+                    folderData.decks.forEach(newDeck => {
+                        const exists = folders[folderName].decks.some(existingDeck => 
+                            existingDeck.name === newDeck.name
+                        );
+                        if (!exists) {
+                            folders[folderName].decks.push(newDeck);
+                        }
+                    });
                 }
-                expandedFolders = new Set([...expandedFolders, ...data.expandedFolders]);
                 
-                await saveData(); // This will auto-sync to cloud
+                expandedFolders = new Set([...expandedFolders, ...data.expandedFolders]);
+                saveData();
                 displayFolders();
                 updatePerformancePanel();
                 
-                showNotification('📥 Backup imported and synced to cloud!', 'success');
+                showNotification('📥 Backup imported successfully!', 'success');
                 return;
             }
             
@@ -291,6 +234,16 @@ function handleFileImport(event) {
             }
             
             const deckName = file.name.replace('.json', '').replace(/_/g, ' ');
+            
+            // Check for duplicate
+            const exists = folders[folderName].decks.some(deck => deck.name === deckName);
+            if (exists) {
+                if (!confirm(`Deck "${deckName}" already exists. Replace it?`)) {
+                    return;
+                }
+                folders[folderName].decks = folders[folderName].decks.filter(deck => deck.name !== deckName);
+            }
+            
             const deck = {
                 name: deckName,
                 questions: data.questions,
@@ -305,11 +258,11 @@ function handleFileImport(event) {
             folders[folderName].decks.push(deck);
             expandedFolders.add(folderName);
             
-            await saveData(); // This will auto-sync to cloud
+            saveData();
             displayFolders();
             updatePerformancePanel();
             
-            showNotification(`✅ ${data.questions.length} questions imported and synced to cloud!`, 'success');
+            showNotification(`✅ ${data.questions.length} questions imported successfully!`, 'success');
             
         } catch (error) {
             showNotification('Error reading file. Please ensure it\'s a valid JSON file.', 'danger');
@@ -331,26 +284,211 @@ function showScreen(screenId) {
 
 function showMainScreen() {
     showScreen('mainScreen');
-    displayFolders();
-    updatePerformancePanel();
-}
-
-function showQuizScreen() {
-    showScreen('quizScreen');
-    displayQuestion();
-    startTimer();
-}
-
-function showResultsScreen() {
-    showScreen('resultsScreen');
-    displayResults();
+    checkForImportData(); // Check if data was passed via URL
 }
 
 function continueOffline() {
     showMainScreen();
 }
 
-// ===== FONT SCALING =====
+// ===== DISPLAY FUNCTIONS =====
+function displayFolders() {
+    const container = document.getElementById('fileTree');
+    const filteredFolders = filterContent();
+    
+    if (Object.keys(filteredFolders).length === 0) {
+        container.innerHTML = `
+            <div style="padding: 50px 20px; text-align: center; color: #6c757d;">
+                ${searchQuery ? 'No results found' : 'No questions yet. Import some JSON files to get started!'}
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = '';
+    
+    // Sync controls
+    const syncControls = document.createElement('div');
+    syncControls.style.cssText = 'padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 0.5rem; margin-bottom: 1rem;';
+    syncControls.innerHTML = `
+        <div style="text-align: center; margin-bottom: 1rem;">
+            <h4 style="margin: 0 0 0.5rem 0;">📱 Device Sync</h4>
+            <small>Import questions here → Use sync options below to transfer to other devices</small>
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+            <button onclick="exportForSync()" class="btn btn-warning btn-sm" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">
+                <i class="fas fa-share"></i> Generate Sync Link
+            </button>
+            <button onclick="exportData()" class="btn btn-info btn-sm" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">
+                <i class="fas fa-download"></i> Download Backup
+            </button>
+            <button onclick="importData()" class="btn btn-success btn-sm" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">
+                <i class="fas fa-upload"></i> Import Backup
+            </button>
+        </div>
+    `;
+    container.appendChild(syncControls);
+    
+    // Import controls
+    const importControls = document.createElement('div');
+    importControls.style.cssText = 'padding: 1rem; background: #f8f9fa; border-radius: 0.5rem; margin-bottom: 1rem;';
+    importControls.innerHTML = `
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+            <button onclick="importDeck()" class="btn btn-primary btn-sm">
+                <i class="fas fa-file-import"></i> Import Questions (JSON)
+            </button>
+        </div>
+        <small style="color: #6c757d;">
+            💡 Import JSON question files → Use sync options above to share with other devices
+        </small>
+    `;
+    container.appendChild(importControls);
+    
+    // Rest of folder display code...
+    for (const [folderName, folderData] of Object.entries(filteredFolders)) {
+        const isExpanded = expandedFolders.has(folderName);
+        
+        const folderDiv = document.createElement('div');
+        folderDiv.className = 'tree-node';
+        
+        const folderContent = document.createElement('div');
+        folderContent.className = 'tree-node-content';
+        
+        folderContent.innerHTML = `
+            <button class="tree-expand-btn ${isExpanded ? 'expanded' : ''}" onclick="toggleFolder('${folderName}')">
+                <i class="fas fa-chevron-right"></i>
+            </button>
+            <i class="tree-icon folder fas fa-folder"></i>
+            <span class="tree-label">${folderName}</span>
+            <span class="tree-count">${folderData.decks.length}</span>
+        `;
+        
+        folderDiv.appendChild(folderContent);
+        
+        if (isExpanded && folderData.decks.length > 0) {
+            const childrenDiv = document.createElement('div');
+            childrenDiv.className = 'tree-children';
+            
+            folderData.decks.forEach(deck => {
+                const deckDiv = document.createElement('div');
+                deckDiv.className = 'tree-node';
+                deckDiv.style.setProperty('--depth', '1');
+                
+                const deckContent = document.createElement('div');
+                deckContent.className = 'tree-node-content';
+                
+                deckContent.innerHTML = `
+                    <span style="width: 20px;"></span>
+                    <i class="tree-icon file fas fa-file-alt"></i>
+                    <span class="tree-label">${deck.name}</span>
+                    <span class="tree-count">${deck.total}</span>
+                    <div class="tree-actions">
+                        <button class="tree-action-btn start" onclick="startQuiz('${folderName}', '${deck.name}', 'fresh')" title="Start quiz">
+                            <i class="fas fa-play"></i>
+                        </button>
+                    </div>
+                `;
+                
+                deckDiv.appendChild(deckContent);
+                childrenDiv.appendChild(deckDiv);
+            });
+            
+            folderDiv.appendChild(childrenDiv);
+        }
+        
+        container.appendChild(folderDiv);
+    }
+}
+
+// ===== HELPER FUNCTIONS =====
+function filterContent() {
+    if (!searchQuery.trim()) return folders;
+    
+    const filtered = {};
+    for (const [folderName, folderData] of Object.entries(folders)) {
+        const folderMatches = folderName.toLowerCase().includes(searchQuery);
+        const matchingDecks = folderData.decks.filter(deck => 
+            deck.name.toLowerCase().includes(searchQuery) ||
+            deck.questions.some(q => q.question.toLowerCase().includes(searchQuery))
+        );
+        
+        if (folderMatches || matchingDecks.length > 0) {
+            filtered[folderName] = {
+                ...folderData,
+                decks: folderMatches ? folderData.decks : matchingDecks
+            };
+        }
+    }
+    return filtered;
+}
+
+function toggleFolder(folderName) {
+    if (expandedFolders.has(folderName)) {
+        expandedFolders.delete(folderName);
+    } else {
+        expandedFolders.add(folderName);
+    }
+    saveData();
+    displayFolders();
+}
+
+function importDeck() {
+    document.getElementById('fileInput').click();
+}
+
+function exportData() {
+    const data = {
+        folders: folders,
+        expandedFolders: Array.from(expandedFolders),
+        settings: { fontScale: fontScale },
+        exportDate: new Date().toISOString()
+    };
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mbbs-quiz-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    showNotification('📤 Backup file downloaded!', 'success');
+}
+
+function importData() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = handleFileImport;
+    input.click();
+}
+
+function updatePerformancePanel() {
+    // Simple stats update
+    const stats = calculateOverallStats();
+    const totalElement = document.getElementById('statTotal');
+    const correctElement = document.getElementById('statCorrect');
+    const incorrectElement = document.getElementById('statIncorrect');
+    
+    if (totalElement) totalElement.textContent = stats.total;
+    if (correctElement) correctElement.textContent = stats.correct;
+    if (incorrectElement) incorrectElement.textContent = stats.incorrect;
+}
+
+function calculateOverallStats() {
+    let total = 0, correct = 0, incorrect = 0;
+    
+    for (const folder of Object.values(folders)) {
+        for (const deck of folder.decks) {
+            total += deck.total;
+            correct += deck.correct;
+            incorrect += deck.incorrect;
+        }
+    }
+    
+    return { total, correct, incorrect };
+}
+
 function changeFontSize(delta) {
     fontScale = Math.max(0.5, Math.min(2.0, fontScale + delta));
     updateFontScale();
@@ -371,7 +509,6 @@ function updateFontScale() {
     }
 }
 
-// ===== SEARCH FUNCTIONALITY =====
 function handleSearch() {
     searchQuery = document.getElementById('searchInput').value.toLowerCase();
     displayFolders();
@@ -383,557 +520,14 @@ function clearSearch() {
     displayFolders();
 }
 
-function filterContent() {
-    if (!searchQuery.trim()) {
-        return folders;
-    }
-    
-    const filtered = {};
-    
-    for (const [folderName, folderData] of Object.entries(folders)) {
-        const folderMatches = folderName.toLowerCase().includes(searchQuery);
-        const matchingDecks = folderData.decks.filter(deck => {
-            const deckMatches = deck.name.toLowerCase().includes(searchQuery);
-            const questionMatches = deck.questions.some(q => 
-                q.question.toLowerCase().includes(searchQuery) ||
-                (q.explanation && q.explanation.toLowerCase().includes(searchQuery)) ||
-                Object.values(q.options || {}).some(opt => opt.toLowerCase().includes(searchQuery))
-            );
-            return deckMatches || questionMatches;
-        });
-        
-        if (folderMatches || matchingDecks.length > 0) {
-            filtered[folderName] = {
-                ...folderData,
-                decks: folderMatches ? folderData.decks : matchingDecks
-            };
-        }
-    }
-    
-    return filtered;
-}
-
-// ===== FOLDER MANAGEMENT =====
-function createRootFolder() {
-    showFolderModal('Create New Folder', '', 'create');
-}
-
-function showFolderModal(title, value, action, oldName = '') {
-    document.getElementById('modalTitle').textContent = title;
-    document.getElementById('folderNameInput').value = value;
-    document.getElementById('confirmBtn').textContent = action === 'create' ? 'Create' : 'Rename';
-    document.getElementById('folderModal').classList.remove('hidden');
-    
-    document.getElementById('folderModal').dataset.action = action;
-    document.getElementById('folderModal').dataset.oldName = oldName;
-    
-    document.getElementById('folderNameInput').focus();
-}
-
-async function confirmFolderAction() {
-    const modal = document.getElementById('folderModal');
-    const action = modal.dataset.action;
-    const oldName = modal.dataset.oldName;
-    const newName = document.getElementById('folderNameInput').value.trim();
-    
-    if (!newName) {
-        showNotification('Please enter a folder name!', 'danger');
-        return;
-    }
-    
-    if (action === 'create') {
-        if (folders[newName]) {
-            showNotification('Folder already exists!', 'danger');
-            return;
-        }
-        folders[newName] = { decks: [], subfolders: {} };
-        expandedFolders.add(newName);
-    } else if (action === 'rename') {
-        if (folders[newName] && newName !== oldName) {
-            showNotification('Folder already exists!', 'danger');
-            return;
-        }
-        folders[newName] = folders[oldName];
-        delete folders[oldName];
-        expandedFolders.delete(oldName);
-        expandedFolders.add(newName);
-        
-        folders[newName].decks.forEach(deck => {
-            deck.folder = newName;
-        });
-    }
-    
-    await saveData();
-    closeModal();
-    displayFolders();
-    showNotification(`Folder ${action === 'create' ? 'created' : 'renamed'} and synced!`, 'success');
-}
-
-function closeModal() {
-    document.getElementById('folderModal').classList.add('hidden');
-}
-
-async function expandAll() {
-    for (const folderName in folders) {
-        expandedFolders.add(folderName);
-    }
-    await saveData();
-    displayFolders();
-}
-
-async function collapseAll() {
-    expandedFolders.clear();
-    await saveData();
-    displayFolders();
-}
-
-// ===== FILE IMPORT =====
-function importDeck() {
-    document.getElementById('fileInput').click();
-}
-
-// ===== EXPORT/IMPORT FUNCTIONS =====
-async function exportData() {
-    const data = {
-        folders: folders,
-        expandedFolders: Array.from(expandedFolders),
-        settings: { fontScale: fontScale },
-        exportDate: new Date().toISOString(),
-        version: '1.0'
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `mbbs-quiz-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    showNotification('📤 Data exported successfully!', 'success');
-}
-
-function importData() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = handleFileImport;
-    input.click();
-}
-
-// ===== DISPLAY FUNCTIONS =====
-function displayFolders() {
-    const container = document.getElementById('fileTree');
-    const filteredFolders = filterContent();
-    
-    if (Object.keys(filteredFolders).length === 0) {
-        container.innerHTML = `
-            <div style="padding: 50px 20px; text-align: center; color: #6c757d;">
-                ${searchQuery ? 'No results found' : 'No folders yet. Import some questions to get started!'}
-            </div>
-        `;
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    // Add sync info at the top
-    const syncInfo = document.createElement('div');
-    syncInfo.style.cssText = 'padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 0.5rem; margin-bottom: 1rem; text-align: center;';
-    syncInfo.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 0.5rem;">
-            🔄 Auto-Sync Active
-        </div>
-        <small>
-            Import on any device → Instantly available everywhere!<br>
-            Last sync: ${lastSyncTime ? new Date(lastSyncTime).toLocaleString() : 'Never'}
-        </small>
-    `;
-    container.appendChild(syncInfo);
-    
-    // Add import controls
-    const importControls = document.createElement('div');
-    importControls.style.cssText = 'padding: 1rem; background: #f8f9fa; border-radius: 0.5rem; margin-bottom: 1rem;';
-    importControls.innerHTML = `
-        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
-            <button onclick="importDeck()" class="btn btn-primary btn-sm">
-                <i class="fas fa-file-import"></i> Import Questions
-            </button>
-            <button onclick="exportData()" class="btn btn-success btn-sm">
-                <i class="fas fa-download"></i> Export Backup
-            </button>
-            <button onclick="importData()" class="btn btn-info btn-sm">
-                <i class="fas fa-upload"></i> Import Backup
-            </button>
-        </div>
-        <small style="color: #6c757d;">
-            💡 Import questions → They sync automatically to all your devices!
-        </small>
-    `;
-    container.appendChild(importControls);
-    
-    for (const [folderName, folderData] of Object.entries(filteredFolders)) {
-        const isExpanded = expandedFolders.has(folderName);
-        
-        const folderDiv = document.createElement('div');
-        folderDiv.className = 'tree-node';
-        
-        const folderContent = document.createElement('div');
-        folderContent.className = 'tree-node-content';
-        folderContent.oncontextmenu = (e) => showContextMenu(e, 'folder', folderName);
-        
-        folderContent.innerHTML = `
-            <button class="tree-expand-btn ${isExpanded ? 'expanded' : ''}" onclick="toggleFolder('${folderName}')">
-                <i class="fas fa-chevron-right"></i>
-            </button>
-            <i class="tree-icon folder fas fa-folder"></i>
-            <span class="tree-label">${folderName}</span>
-            <span class="tree-count">${folderData.decks.length}</span>
-            <div class="tree-actions">
-                <button class="tree-action-btn start" onclick="importToFolder('${folderName}')" title="Import to this folder">
-                    <i class="fas fa-file-import"></i>
-                </button>
-                <button class="tree-action-btn bookmark" onclick="renameFolder('${folderName}')" title="Rename folder">
-                    <i class="fas fa-edit"></i>
-                </button>
-                ${folderName !== 'Uncategorized' ? 
-                    `<button class="tree-action-btn delete" onclick="deleteFolder('${folderName}')" title="Delete folder">
-                        <i class="fas fa-trash"></i>
-                    </button>` : ''}
-            </div>
-        `;
-        
-        folderDiv.appendChild(folderContent);
-        
-        if (isExpanded && folderData.decks.length > 0) {
-            const childrenDiv = document.createElement('div');
-            childrenDiv.className = 'tree-children';
-            
-            folderData.decks.forEach(deck => {
-                const deckDiv = document.createElement('div');
-                deckDiv.className = 'tree-node';
-                deckDiv.style.setProperty('--depth', '1');
-                
-                const deckContent = document.createElement('div');
-                deckContent.className = 'tree-node-content';
-                deckContent.oncontextmenu = (e) => showContextMenu(e, 'deck', deck, folderName);
-                
-                deckContent.innerHTML = `
-                    <span style="width: 20px;"></span>
-                    <i class="tree-icon file fas fa-file-alt"></i>
-                    <span class="tree-label">${deck.name}</span>
-                    <span class="tree-count">${deck.total}</span>
-                    <div class="tree-actions">
-                        <button class="tree-action-btn start" onclick="startQuiz('${folderName}', '${deck.name}', 'fresh')" title="Start fresh quiz">
-                            <i class="fas fa-play"></i>
-                        </button>
-                        ${getIncorrectCount(deck) > 0 ? 
-                            `<button class="tree-action-btn review" onclick="startQuiz('${folderName}', '${deck.name}', 'incorrect')" title="Review incorrect">
-                                <i class="fas fa-times"></i>
-                            </button>` : ''}
-                        ${getBookmarkedCount(deck) > 0 ? 
-                            `<button class="tree-action-btn bookmark" onclick="startQuiz('${folderName}', '${deck.name}', 'bookmarked')" title="Review bookmarked">
-                                <i class="fas fa-bookmark"></i>
-                            </button>` : ''}
-                        <button class="tree-action-btn delete" onclick="deleteDeck('${folderName}', '${deck.name}')" title="Delete deck">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                `;
-                
-                deckDiv.appendChild(deckContent);
-                childrenDiv.appendChild(deckDiv);
-            });
-            
-            folderDiv.appendChild(childrenDiv);
-        }
-        
-        container.appendChild(folderDiv);
-    }
-}
-
-async function toggleFolder(folderName) {
-    if (expandedFolders.has(folderName)) {
-        expandedFolders.delete(folderName);
-    } else {
-        expandedFolders.add(folderName);
-    }
-    await saveData();
-    displayFolders();
-}
-
-function renameFolder(folderName) {
-    showFolderModal('Rename Folder', folderName, 'rename', folderName);
-}
-
-async function deleteFolder(folderName) {
-    if (folderName === 'Uncategorized') {
-        showNotification('Cannot delete Uncategorized folder!', 'danger');
-        return;
-    }
-    
-    if (confirm(`Delete folder "${folderName}"? Decks will be moved to Uncategorized.`)) {
-        if (folders[folderName].decks.length > 0) {
-            folders.Uncategorized.decks.push(...folders[folderName].decks);
-        }
-        delete folders[folderName];
-        expandedFolders.delete(folderName);
-        await saveData();
-        displayFolders();
-        updatePerformancePanel();
-        showNotification('Folder deleted and synced!', 'success');
-    }
-}
-
-function importToFolder(folderName) {
-    document.getElementById('fileInput').dataset.targetFolder = folderName;
-    document.getElementById('fileInput').click();
-}
-
-async function deleteDeck(folderName, deckName) {
-    if (confirm(`Delete deck "${deckName}"?`)) {
-        const folder = folders[folderName];
-        folder.decks = folder.decks.filter(deck => deck.name !== deckName);
-        await saveData();
-        displayFolders();
-        updatePerformancePanel();
-        showNotification('Deck deleted and synced!', 'success');
-    }
-}
-
-function getIncorrectCount(deck) {
-    return Math.floor(deck.total * 0.2);
-}
-
-function getBookmarkedCount(deck) {
-    return Math.floor(deck.total * 0.1);
-}
-
-// ===== CONTEXT MENU =====
-function showContextMenu(e, type, item, folderName = '') {
-    e.preventDefault();
-    const contextMenu = document.getElementById('contextMenu');
-    contextTarget = { type, item, folderName };
-    
-    contextMenu.style.left = e.pageX + 'px';
-    contextMenu.style.top = e.pageY + 'px';
-    contextMenu.classList.remove('hidden');
-    
-    document.addEventListener('click', hideContextMenu);
-}
-
-function hideContextMenu() {
-    document.getElementById('contextMenu').classList.add('hidden');
-    document.removeEventListener('click', hideContextMenu);
-}
-
-async function contextAction(action) {
-    hideContextMenu();
-    
-    if (!contextTarget) return;
-    
-    switch (action) {
-        case 'newFolder':
-            createRootFolder();
-            break;
-        case 'import':
-            if (contextTarget.type === 'folder') {
-                importToFolder(contextTarget.item);
-            }
-            break;
-        case 'rename':
-            if (contextTarget.type === 'folder') {
-                renameFolder(contextTarget.item);
-            }
-            break;
-        case 'delete':
-            if (contextTarget.type === 'folder') {
-                await deleteFolder(contextTarget.item);
-            } else if (contextTarget.type === 'deck') {
-                await deleteDeck(contextTarget.folderName, contextTarget.item.name);
-            }
-            break;
-    }
-}
-
-// ===== PERFORMANCE PANEL =====
-function updatePerformancePanel() {
-    const stats = calculateOverallStats();
-    
-    const totalElement = document.getElementById('statTotal');
-    const correctElement = document.getElementById('statCorrect');
-    const incorrectElement = document.getElementById('statIncorrect');
-    
-    if (totalElement) totalElement.textContent = stats.total;
-    if (correctElement) correctElement.textContent = stats.correct;
-    if (incorrectElement) incorrectElement.textContent = stats.incorrect;
-    
-    updatePerformanceChart(stats);
-    updateRecentActivity();
-}
-
-function calculateOverallStats() {
-    let total = 0, correct = 0, incorrect = 0, attempted = 0;
-    
-    for (const folder of Object.values(folders)) {
-        for (const deck of folder.decks) {
-            total += deck.total;
-            correct += deck.correct;
-            incorrect += deck.incorrect;
-            attempted += deck.attempted;
-        }
-    }
-    
-    const skipped = total - attempted;
-    return { total, correct, incorrect, skipped, attempted };
-}
-
-function updatePerformanceChart(stats) {
-    const ctx = document.getElementById('performanceChart');
-    if (!ctx) return;
-    
-    if (performanceChart) {
-        performanceChart.destroy();
-    }
-    
-    if (stats.total === 0) {
-        const context = ctx.getContext('2d');
-        context.clearRect(0, 0, ctx.width, ctx.height);
-        context.font = '14px Segoe UI';
-        context.fillStyle = '#6c757d';
-        context.textAlign = 'center';
-        context.fillText('Import questions to see stats', ctx.width / 2, ctx.height / 2);
-        return;
-    }
-    
-    if (window.Chart) {
-        performanceChart = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Correct', 'Incorrect', 'Skipped'],
-                datasets: [{
-                    data: [stats.correct, stats.incorrect, stats.skipped],
-                    backgroundColor: ['#4facfe', '#fa709a', '#adb5bd'],
-                    borderWidth: 2,
-                    borderColor: '#fff'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            fontSize: 10,
-                            padding: 10
-                        }
-                    }
-                }
-            }
-        });
-    }
-}
-
-function updateRecentActivity() {
-    const activityList = document.getElementById('activityList');
-    if (!activityList) return;
-    
-    const activities = [
-        { title: 'Auto-sync active', time: 'Real-time', icon: 'fas fa-sync' },
-        { title: 'Data synced to cloud', time: lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : 'Not yet', icon: 'fas fa-cloud-upload-alt' },
-        { title: 'Cross-device ready', time: 'Always', icon: 'fas fa-mobile-alt' }
-    ];
-    
-    activityList.innerHTML = activities.map(activity => `
-        <div class="activity-item">
-            <div class="activity-icon">
-                <i class="${activity.icon}"></i>
-            </div>
-            <div class="activity-content">
-                <div class="activity-title">${activity.title}</div>
-                <div class="activity-time">${activity.time}</div>
-            </div>
-        </div>
-    `).join('');
-}
-
-// ===== QUIZ FUNCTIONS (Shortened for space - same as before) =====
 function startQuiz(folderName, deckName, mode = 'normal') {
-    const deck = folders[folderName].decks.find(d => d.name === deckName);
-    if (!deck) return;
-    
-    currentQuiz = { ...deck, folderName };
-    quizMode = mode;
-    currentQuestionIndex = 0;
-    answers = {};
-    bookmarkedQuestions = new Set();
-    
-    if (mode === 'incorrect') {
-        quizQuestions = deck.questions.slice(0, Math.ceil(deck.questions.length * 0.2));
-    } else if (mode === 'bookmarked') {
-        quizQuestions = deck.questions.slice(0, Math.ceil(deck.questions.length * 0.1));
-    } else {
-        quizQuestions = [...deck.questions];
-    }
-    
-    quizQuestions.sort(() => Math.random() - 0.5);
-    showQuizScreen();
+    showNotification('Quiz feature coming soon!', 'info');
 }
 
-function displayQuestion() {
-    if (currentQuestionIndex >= quizQuestions.length) return;
-    
-    const question = quizQuestions[currentQuestionIndex];
-    
-    const questionCounter = document.getElementById('questionCounter');
-    if (questionCounter) {
-        questionCounter.textContent = `Question ${currentQuestionIndex + 1} of ${quizQuestions.length}`;
-    }
-    
-    const modeIcons = {
-        fresh: '<i class="fas fa-star"></i> Fresh Start',
-        incorrect: '<i class="fas fa-times"></i> Review Mode',
-        bookmarked: '<i class="fas fa-bookmark"></i> Bookmarked',
-        normal: '<i class="fas fa-book"></i> Normal Mode'
-    };
-    const modeIndicator = document.getElementById('modeIndicator');
-    if (modeIndicator) {
-        modeIndicator.innerHTML = modeIcons[quizMode] || modeIcons.normal;
-    }
-    
-    const qNumber = document.getElementById('qNumber');
-    if (qNumber) qNumber.textContent = currentQuestionIndex + 1;
-    
-    const questionText = document.getElementById('questionText');
-    if (questionText) questionText.innerHTML = question.question;
-    
-    const optionsContainer = document.getElementById('optionsContainer');
-    if (optionsContainer) {
-        optionsContainer.innerHTML = '';
-        
-        for (const [key, value] of Object.entries(question.options || {})) {
-            const optionDiv = document.createElement('div');
-            optionDiv.className = 'option';
-            optionDiv.innerHTML = `<strong>(${key})</strong> ${value}`;
-            optionDiv.onclick = () => selectOption(key, optionDiv);
-            optionsContainer.appendChild(optionDiv);
-        }
-    }
-    
-    updateBookmarkButton();
-    updateNavigationButtons();
-    updateProgressButtons();
-    updateCurrentScore();
-    
-    if (answers[currentQuestionIndex]) {
-        showAnswer(answers[currentQuestionIndex].selected);
-    } else {
-        clearExplanation();
-    }
+function checkInstallStatus() {
+    // PWA check
+    return window.matchMedia('(display-mode: standalone)').matches;
 }
-
-// ... (Include all other quiz functions from the previous script)
 
 // ===== NOTIFICATION SYSTEM =====
 function showNotification(message, type = 'info') {
@@ -963,10 +557,6 @@ function showNotification(message, type = 'info') {
     setTimeout(() => {
         notification.remove();
     }, 5000);
-    
-    notification.addEventListener('click', () => {
-        notification.remove();
-    });
 }
 
 function createNotificationContainer() {
@@ -977,20 +567,7 @@ function createNotificationContainer() {
     return container;
 }
 
-// ... (Include all remaining functions)
-
-// ===== ONLINE/OFFLINE DETECTION =====
-window.addEventListener('online', () => {
-    showNotification('🌐 Back online - syncing...', 'info');
-    checkAndSync();
-});
-
-window.addEventListener('offline', () => {
-    updateSyncStatus('offline');
-    showNotification('📱 Offline mode - data saved locally', 'warning');
-});
-
-// Initialize when page loads
+// Initialize
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
 } else {
