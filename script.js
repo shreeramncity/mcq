@@ -1,575 +1,329 @@
-// ===== MBBS Quiz Master - GitHub Gist Sync =====
+// ===== SIMPLE GITHUB SYNC THAT ACTUALLY WORKS =====
 
-// Sync Configuration (Using GitHub Gist - 100% reliable)
-const GIST_ID = ''; // We'll create this
-const GITHUB_TOKEN = ''; // We'll create this
+const GITHUB_TOKEN = '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';
+const GITHUB_API = 'https://api.github.com/repos/shreeramncity/mcq/contents/quiz-data.json';
 
-// Global Variables
-let folders = {};
-let expandedFolders = new Set();
-let searchQuery = '';
-let fontScale = 1;
-let currentScreen = 'main';
-let lastSyncTime = null;
+let folders = {
+    "General Medicine": { decks: [] },
+    "Surgery": { decks: [] },
+    "Pediatrics": { decks: [] },
+    "Gynecology": { decks: [] },
+    "Uncategorized": { decks: [] }
+};
 
 // ===== INITIALIZATION =====
-document.addEventListener('DOMContentLoaded', function() {
-    initializeApp();
+document.addEventListener('DOMContentLoaded', async function() {
+    console.log('🚀 App starting...');
+    showMainScreen();
+    
+    // Try to load from GitHub
+    await loadFromGitHub();
+    displayFolders();
 });
 
-async function initializeApp() {
-    showMainScreen();
-    updateSyncStatus('loading');
+// ===== GITHUB FUNCTIONS =====
+async function saveToGitHub() {
+    console.log('💾 Saving to GitHub...');
     
-    // Load from local storage first (instant)
-    loadLocalData();
-    displayFolders();
-    updatePerformancePanel();
-    
-    // Then try to sync from cloud
-    await syncFromCloud();
-    
-    // Auto-sync every 30 seconds
-    setInterval(syncToCloud, 30000);
-}
-
-// ===== SIMPLE LOCAL + MANUAL SYNC =====
-function loadLocalData() {
-    folders = loadFromStorage('mbbs_folders', getDefaultFolders());
-    expandedFolders = new Set(loadFromStorage('mbbs_expanded', []));
-    fontScale = loadFromStorage('mbbs_fontScale', 1);
-    updateFontScale();
-    updateSyncStatus('local');
-}
-
-function saveData() {
-    saveToStorage('mbbs_folders', folders);
-    saveToStorage('mbbs_expanded', Array.from(expandedFolders));
-    saveToStorage('mbbs_fontScale', fontScale);
-    syncToCloud(); // Try to sync to cloud
-}
-
-function saveToStorage(key, data) {
-    localStorage.setItem(key, JSON.stringify(data));
-}
-
-function loadFromStorage(key, defaultValue = {}) {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultValue;
-}
-
-// ===== MANUAL SYNC FUNCTIONS =====
-async function exportForSync() {
-    const data = {
-        folders: folders,
-        expandedFolders: Array.from(expandedFolders),
-        settings: { fontScale: fontScale },
-        exportDate: new Date().toISOString(),
-        version: '1.0'
-    };
-    
-    // Create a URL that can be shared
-    const dataString = btoa(JSON.stringify(data)); // Encode to base64
-    const syncUrl = `${window.location.origin}${window.location.pathname}?import=${dataString}`;
-    
-    // Copy to clipboard
-    if (navigator.clipboard) {
-        await navigator.clipboard.writeText(syncUrl);
-        showNotification('🔗 Sync URL copied! Share this link to sync devices.', 'success');
-    } else {
-        // Fallback - show URL in modal
-        prompt('Copy this URL to sync devices:', syncUrl);
-    }
-    
-    // Also create downloadable backup
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `mbbs-quiz-sync-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-function checkForImportData() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const importData = urlParams.get('import');
-    
-    if (importData) {
+    try {
+        // Prepare data
+        const data = {
+            folders: folders,
+            lastUpdated: new Date().toISOString(),
+            device: navigator.userAgent.includes('Mobile') ? 'mobile' : 'desktop'
+        };
+        
+        const content = btoa(JSON.stringify(data, null, 2)); // Convert to base64
+        
+        // Get current file (if exists) to get SHA
+        let sha = null;
         try {
-            const data = JSON.parse(atob(importData)); // Decode from base64
-            
-            if (data.folders) {
-                folders = data.folders;
-                expandedFolders = new Set(data.expandedFolders || []);
-                fontScale = data.settings?.fontScale || 1;
-                
-                saveData();
-                displayFolders();
-                updatePerformancePanel();
-                updateFontScale();
-                
-                showNotification('📥 Data imported from sync URL!', 'success');
-                
-                // Clean URL
-                window.history.replaceState({}, document.title, window.location.pathname);
+            const getResponse = await fetch(GITHUB_API, {
+                headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+            });
+            if (getResponse.ok) {
+                const fileData = await getResponse.json();
+                sha = fileData.sha;
+                console.log('📄 Found existing file, SHA:', sha);
             }
-        } catch (error) {
-            showNotification('❌ Invalid sync URL', 'danger');
+        } catch (e) {
+            console.log('📄 No existing file, creating new one');
         }
-    }
-}
-
-// ===== SIMPLE CLOUD SYNC (FALLBACK) =====
-async function syncToCloud() {
-    // Simple sync - just save to localStorage with timestamp
-    const data = {
-        folders: folders,
-        expandedFolders: Array.from(expandedFolders),
-        settings: { fontScale: fontScale },
-        timestamp: Date.now()
-    };
-    
-    localStorage.setItem('mbbs_cloud_data', JSON.stringify(data));
-    lastSyncTime = new Date().toISOString();
-    updateSyncStatus('synced');
-}
-
-async function syncFromCloud() {
-    const cloudData = localStorage.getItem('mbbs_cloud_data');
-    if (cloudData) {
-        try {
-            const data = JSON.parse(cloudData);
-            lastSyncTime = new Date(data.timestamp).toISOString();
-            updateSyncStatus('synced');
-        } catch (error) {
-            updateSyncStatus('local');
+        
+        // Save to GitHub
+        const saveData = {
+            message: `Update quiz data from ${data.device} - ${new Date().toLocaleString()}`,
+            content: content,
+            branch: 'main'
+        };
+        
+        if (sha) saveData.sha = sha; // Include SHA if updating existing file
+        
+        const response = await fetch(GITHUB_API, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${GITHUB_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(saveData)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Saved to GitHub!', result.commit.sha);
+            showMessage('✅ Data saved to GitHub repository!', 'success');
+            updateSyncStatus('✅ Synced to GitHub');
+            return true;
+        } else {
+            const error = await response.text();
+            console.error('❌ Save failed:', error);
+            showMessage('❌ Save failed: ' + error, 'error');
+            return false;
         }
+        
+    } catch (error) {
+        console.error('❌ Save error:', error);
+        showMessage('❌ Save error: ' + error.message, 'error');
+        return false;
     }
 }
 
-function getDefaultFolders() {
-    return {
-        "General Medicine": { decks: [], subfolders: {} },
-        "Surgery": { decks: [], subfolders: {} },
-        "Pediatrics": { decks: [], subfolders: {} },
-        "Gynecology": { decks: [], subfolders: {} },
-        "Uncategorized": { decks: [], subfolders: {} }
-    };
-}
-
-// ===== STATUS DISPLAY =====
-function updateSyncStatus(status) {
-    const syncIcon = document.getElementById('syncIcon');
-    const syncText = document.getElementById('syncText');
+async function loadFromGitHub() {
+    console.log('📥 Loading from GitHub...');
     
-    if (!syncIcon || !syncText) return;
-    
-    switch (status) {
-        case 'synced':
-            syncIcon.className = 'fas fa-save';
-            syncIcon.style.color = '#28a745';
-            syncText.textContent = 'Saved Locally';
-            break;
-        case 'loading':
-            syncIcon.className = 'fas fa-spinner fa-spin';
-            syncIcon.style.color = '#007bff';
-            syncText.textContent = 'Loading...';
-            break;
-        case 'local':
-            syncIcon.className = 'fas fa-hdd';
-            syncIcon.style.color = '#6c757d';
-            syncText.textContent = 'Local Storage';
-            break;
+    try {
+        const response = await fetch(GITHUB_API, {
+            headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+        });
+        
+        if (response.ok) {
+            const fileData = await response.json();
+            const content = atob(fileData.content); // Decode from base64
+            const data = JSON.parse(content);
+            
+            folders = data.folders || folders;
+            
+            console.log('✅ Loaded from GitHub!', Object.keys(folders).length, 'folders');
+            showMessage('📥 Data loaded from GitHub!', 'success');
+            updateSyncStatus('✅ Loaded from GitHub');
+            return true;
+            
+        } else if (response.status === 404) {
+            console.log('📄 No data file found in GitHub yet');
+            showMessage('📄 No data in GitHub yet. Import some files!', 'info');
+            updateSyncStatus('🆕 Ready to sync');
+            return false;
+        } else {
+            console.error('❌ Load failed:', response.status);
+            showMessage('❌ Failed to load from GitHub', 'error');
+            return false;
+        }
+        
+    } catch (error) {
+        console.error('❌ Load error:', error);
+        showMessage('❌ Load error: ' + error.message, 'error');
+        return false;
     }
 }
 
-// ===== FILE IMPORT WITH SYNC =====
+// ===== FILE IMPORT =====
 function handleFileImport(event) {
     const file = event.target.files[0];
     if (!file) return;
     
+    console.log('📂 Importing file:', file.name);
+    
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
             const data = JSON.parse(e.target.result);
             
-            // Check if it's a backup file
-            if (data.folders) {
-                // Merge backup data
-                for (const [folderName, folderData] of Object.entries(data.folders)) {
-                    if (!folders[folderName]) {
-                        folders[folderName] = { decks: [], subfolders: {} };
-                    }
-                    
-                    // Avoid duplicates
-                    folderData.decks.forEach(newDeck => {
-                        const exists = folders[folderName].decks.some(existingDeck => 
-                            existingDeck.name === newDeck.name
-                        );
-                        if (!exists) {
-                            folders[folderName].decks.push(newDeck);
-                        }
-                    });
-                }
-                
-                expandedFolders = new Set([...expandedFolders, ...data.expandedFolders]);
-                saveData();
-                displayFolders();
-                updatePerformancePanel();
-                
-                showNotification('📥 Backup imported successfully!', 'success');
-                return;
-            }
-            
-            // Regular question deck import
             if (!data.questions || !Array.isArray(data.questions)) {
-                showNotification('Invalid file format! Please select a valid JSON question deck.', 'danger');
+                showMessage('❌ Invalid file! Need JSON with questions array.', 'error');
                 return;
             }
             
             const folderName = data.folder || 'Uncategorized';
-            if (!folders[folderName]) {
-                folders[folderName] = { decks: [], subfolders: {} };
-            }
-            
             const deckName = file.name.replace('.json', '').replace(/_/g, ' ');
             
-            // Check for duplicate
-            const exists = folders[folderName].decks.some(deck => deck.name === deckName);
-            if (exists) {
-                if (!confirm(`Deck "${deckName}" already exists. Replace it?`)) {
-                    return;
-                }
-                folders[folderName].decks = folders[folderName].decks.filter(deck => deck.name !== deckName);
+            // Add to folders
+            if (!folders[folderName]) {
+                folders[folderName] = { decks: [] };
             }
             
             const deck = {
                 name: deckName,
                 questions: data.questions,
                 total: data.questions.length,
-                correct: 0,
-                incorrect: 0,
-                attempted: 0,
-                folder: folderName,
                 importedAt: new Date().toISOString()
             };
             
             folders[folderName].decks.push(deck);
-            expandedFolders.add(folderName);
             
-            saveData();
+            console.log(`📚 Added ${data.questions.length} questions to ${folderName}`);
+            
+            // Save to GitHub immediately
+            const saved = await saveToGitHub();
+            
+            // Update display
             displayFolders();
-            updatePerformancePanel();
             
-            showNotification(`✅ ${data.questions.length} questions imported successfully!`, 'success');
+            if (saved) {
+                showMessage(`🎉 ${data.questions.length} questions imported and synced to GitHub!`, 'success');
+            } else {
+                showMessage(`⚠️ ${data.questions.length} questions imported (sync failed)`, 'warning');
+            }
             
         } catch (error) {
-            showNotification('Error reading file. Please ensure it\'s a valid JSON file.', 'danger');
+            console.error('Import error:', error);
+            showMessage('❌ Import failed: ' + error.message, 'error');
         }
     };
-    reader.readAsText(file);
     
+    reader.readAsText(file);
     event.target.value = '';
 }
 
-// ===== SCREEN MANAGEMENT =====
-function showScreen(screenId) {
-    document.querySelectorAll('.screen').forEach(screen => {
-        screen.classList.add('hidden');
-    });
-    document.getElementById(screenId).classList.remove('hidden');
-    currentScreen = screenId;
-}
-
+// ===== UI FUNCTIONS =====
 function showMainScreen() {
-    showScreen('mainScreen');
-    checkForImportData(); // Check if data was passed via URL
+    document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+    document.getElementById('mainScreen').classList.remove('hidden');
 }
 
 function continueOffline() {
     showMainScreen();
 }
 
-// ===== DISPLAY FUNCTIONS =====
 function displayFolders() {
     const container = document.getElementById('fileTree');
-    const filteredFolders = filterContent();
+    if (!container) return;
     
-    if (Object.keys(filteredFolders).length === 0) {
-        container.innerHTML = `
-            <div style="padding: 50px 20px; text-align: center; color: #6c757d;">
-                ${searchQuery ? 'No results found' : 'No questions yet. Import some JSON files to get started!'}
-            </div>
-        `;
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    // Sync controls
-    const syncControls = document.createElement('div');
-    syncControls.style.cssText = 'padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 0.5rem; margin-bottom: 1rem;';
-    syncControls.innerHTML = `
-        <div style="text-align: center; margin-bottom: 1rem;">
-            <h4 style="margin: 0 0 0.5rem 0;">📱 Device Sync</h4>
-            <small>Import questions here → Use sync options below to transfer to other devices</small>
-        </div>
-        <div style="display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
-            <button onclick="exportForSync()" class="btn btn-warning btn-sm" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">
-                <i class="fas fa-share"></i> Generate Sync Link
-            </button>
-            <button onclick="exportData()" class="btn btn-info btn-sm" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">
-                <i class="fas fa-download"></i> Download Backup
-            </button>
-            <button onclick="importData()" class="btn btn-success btn-sm" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">
-                <i class="fas fa-upload"></i> Import Backup
-            </button>
-        </div>
-    `;
-    container.appendChild(syncControls);
-    
-    // Import controls
-    const importControls = document.createElement('div');
-    importControls.style.cssText = 'padding: 1rem; background: #f8f9fa; border-radius: 0.5rem; margin-bottom: 1rem;';
-    importControls.innerHTML = `
-        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
-            <button onclick="importDeck()" class="btn btn-primary btn-sm">
-                <i class="fas fa-file-import"></i> Import Questions (JSON)
-            </button>
-        </div>
-        <small style="color: #6c757d;">
-            💡 Import JSON question files → Use sync options above to share with other devices
-        </small>
-    `;
-    container.appendChild(importControls);
-    
-    // Rest of folder display code...
-    for (const [folderName, folderData] of Object.entries(filteredFolders)) {
-        const isExpanded = expandedFolders.has(folderName);
-        
-        const folderDiv = document.createElement('div');
-        folderDiv.className = 'tree-node';
-        
-        const folderContent = document.createElement('div');
-        folderContent.className = 'tree-node-content';
-        
-        folderContent.innerHTML = `
-            <button class="tree-expand-btn ${isExpanded ? 'expanded' : ''}" onclick="toggleFolder('${folderName}')">
-                <i class="fas fa-chevron-right"></i>
-            </button>
-            <i class="tree-icon folder fas fa-folder"></i>
-            <span class="tree-label">${folderName}</span>
-            <span class="tree-count">${folderData.decks.length}</span>
-        `;
-        
-        folderDiv.appendChild(folderContent);
-        
-        if (isExpanded && folderData.decks.length > 0) {
-            const childrenDiv = document.createElement('div');
-            childrenDiv.className = 'tree-children';
-            
-            folderData.decks.forEach(deck => {
-                const deckDiv = document.createElement('div');
-                deckDiv.className = 'tree-node';
-                deckDiv.style.setProperty('--depth', '1');
-                
-                const deckContent = document.createElement('div');
-                deckContent.className = 'tree-node-content';
-                
-                deckContent.innerHTML = `
-                    <span style="width: 20px;"></span>
-                    <i class="tree-icon file fas fa-file-alt"></i>
-                    <span class="tree-label">${deck.name}</span>
-                    <span class="tree-count">${deck.total}</span>
-                    <div class="tree-actions">
-                        <button class="tree-action-btn start" onclick="startQuiz('${folderName}', '${deck.name}', 'fresh')" title="Start quiz">
-                            <i class="fas fa-play"></i>
-                        </button>
-                    </div>
-                `;
-                
-                deckDiv.appendChild(deckContent);
-                childrenDiv.appendChild(deckDiv);
-            });
-            
-            folderDiv.appendChild(childrenDiv);
-        }
-        
-        container.appendChild(folderDiv);
-    }
-}
-
-// ===== HELPER FUNCTIONS =====
-function filterContent() {
-    if (!searchQuery.trim()) return folders;
-    
-    const filtered = {};
-    for (const [folderName, folderData] of Object.entries(folders)) {
-        const folderMatches = folderName.toLowerCase().includes(searchQuery);
-        const matchingDecks = folderData.decks.filter(deck => 
-            deck.name.toLowerCase().includes(searchQuery) ||
-            deck.questions.some(q => q.question.toLowerCase().includes(searchQuery))
-        );
-        
-        if (folderMatches || matchingDecks.length > 0) {
-            filtered[folderName] = {
-                ...folderData,
-                decks: folderMatches ? folderData.decks : matchingDecks
-            };
-        }
-    }
-    return filtered;
-}
-
-function toggleFolder(folderName) {
-    if (expandedFolders.has(folderName)) {
-        expandedFolders.delete(folderName);
-    } else {
-        expandedFolders.add(folderName);
-    }
-    saveData();
-    displayFolders();
-}
-
-function importDeck() {
-    document.getElementById('fileInput').click();
-}
-
-function exportData() {
-    const data = {
-        folders: folders,
-        expandedFolders: Array.from(expandedFolders),
-        settings: { fontScale: fontScale },
-        exportDate: new Date().toISOString()
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `mbbs-quiz-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    showNotification('📤 Backup file downloaded!', 'success');
-}
-
-function importData() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = handleFileImport;
-    input.click();
-}
-
-function updatePerformancePanel() {
-    // Simple stats update
-    const stats = calculateOverallStats();
-    const totalElement = document.getElementById('statTotal');
-    const correctElement = document.getElementById('statCorrect');
-    const incorrectElement = document.getElementById('statIncorrect');
-    
-    if (totalElement) totalElement.textContent = stats.total;
-    if (correctElement) correctElement.textContent = stats.correct;
-    if (incorrectElement) incorrectElement.textContent = stats.incorrect;
-}
-
-function calculateOverallStats() {
-    let total = 0, correct = 0, incorrect = 0;
-    
+    // Count total questions
+    let totalQuestions = 0;
+    let totalDecks = 0;
     for (const folder of Object.values(folders)) {
+        totalDecks += folder.decks.length;
         for (const deck of folder.decks) {
-            total += deck.total;
-            correct += deck.correct;
-            incorrect += deck.incorrect;
+            totalQuestions += deck.total || 0;
         }
     }
     
-    return { total, correct, incorrect };
+    container.innerHTML = `
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+            <h3 style="margin: 0 0 10px 0;">📚 MBBS Quiz Master</h3>
+            <p style="margin: 0; opacity: 0.9;">
+                ${totalDecks} decks • ${totalQuestions} questions
+            </p>
+            <div id="syncStatus" style="margin-top: 10px; font-size: 14px;">
+                🔄 Ready to sync
+            </div>
+        </div>
+        
+        <div style="text-align: center; margin-bottom: 20px;">
+            <button onclick="document.getElementById('fileInput').click()" 
+                    style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; cursor: pointer;">
+                📁 Import JSON Questions
+            </button>
+            <button onclick="testSync()" 
+                    style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; cursor: pointer; margin-left: 10px;">
+                🧪 Test Sync
+            </button>
+            <input type="file" id="fileInput" accept=".json" style="display: none;" onchange="handleFileImport(event)">
+        </div>
+        
+        <div id="messageArea" style="margin-bottom: 20px;"></div>
+        
+        ${Object.entries(folders).map(([folderName, folderData]) => `
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #495057;">
+                    📁 ${folderName} (${folderData.decks.length} decks)
+                </h4>
+                ${folderData.decks.map(deck => `
+                    <div style="margin-left: 20px; padding: 8px; background: white; border-radius: 5px; margin-bottom: 5px;">
+                        📄 <strong>${deck.name}</strong> - ${deck.total} questions
+                        <small style="color: #666; display: block;">
+                            Imported: ${new Date(deck.importedAt).toLocaleString()}
+                        </small>
+                    </div>
+                `).join('')}
+                ${folderData.decks.length === 0 ? '<p style="margin-left: 20px; color: #666;">No decks yet</p>' : ''}
+            </div>
+        `).join('')}
+    `;
 }
 
-function changeFontSize(delta) {
-    fontScale = Math.max(0.5, Math.min(2.0, fontScale + delta));
-    updateFontScale();
-    saveData();
-}
-
-function resetFontSize() {
-    fontScale = 1;
-    updateFontScale();
-    saveData();
-}
-
-function updateFontScale() {
-    document.documentElement.style.setProperty('--font-scale', fontScale);
-    const fontScaleElement = document.getElementById('fontScale');
-    if (fontScaleElement) {
-        fontScaleElement.textContent = Math.round(fontScale * 100);
+function updateSyncStatus(message) {
+    const statusEl = document.getElementById('syncStatus');
+    if (statusEl) {
+        statusEl.innerHTML = message;
     }
 }
 
-function handleSearch() {
-    searchQuery = document.getElementById('searchInput').value.toLowerCase();
-    displayFolders();
-}
-
-function clearSearch() {
-    document.getElementById('searchInput').value = '';
-    searchQuery = '';
-    displayFolders();
-}
-
-function startQuiz(folderName, deckName, mode = 'normal') {
-    showNotification('Quiz feature coming soon!', 'info');
-}
-
-function checkInstallStatus() {
-    // PWA check
-    return window.matchMedia('(display-mode: standalone)').matches;
-}
-
-// ===== NOTIFICATION SYSTEM =====
-function showNotification(message, type = 'info') {
-    const container = document.getElementById('notifications') || createNotificationContainer();
+function showMessage(message, type = 'info') {
+    console.log(`[${type.toUpperCase()}] ${message}`);
     
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
+    const area = document.getElementById('messageArea');
+    if (!area) return;
     
-    const icons = {
-        success: 'fas fa-check-circle',
-        danger: 'fas fa-exclamation-circle',
-        warning: 'fas fa-exclamation-triangle',
-        info: 'fas fa-info-circle'
+    const colors = {
+        success: '#d4edda',
+        error: '#f8d7da', 
+        warning: '#fff3cd',
+        info: '#d1ecf1'
     };
     
-    notification.innerHTML = `
-        <div class="notification-content">
-            <i class="${icons[type]} notification-icon"></i>
-            <div class="notification-text">
-                <div class="notification-message">${message}</div>
-            </div>
+    area.innerHTML = `
+        <div style="background: ${colors[type]}; padding: 12px; border-radius: 6px; margin: 5px 0;">
+            ${message}
         </div>
     `;
-    
-    container.appendChild(notification);
     
     setTimeout(() => {
-        notification.remove();
+        area.innerHTML = '';
     }, 5000);
 }
 
-function createNotificationContainer() {
-    const container = document.createElement('div');
-    container.id = 'notifications';
-    container.className = 'notifications-container';
-    document.body.appendChild(container);
-    return container;
+// ===== TEST FUNCTIONS =====
+async function testSync() {
+    console.log('🧪 Testing sync...');
+    
+    // Add test data
+    const testDeck = {
+        name: 'Test Deck ' + Date.now(),
+        questions: [
+            {
+                question: 'What is the normal heart rate?',
+                options: { A: '60-100 bpm', B: '80-120 bpm', C: '100-140 bpm' },
+                correct_answer: 'A'
+            }
+        ],
+        total: 1,
+        importedAt: new Date().toISOString()
+    };
+    
+    folders.Uncategorized.decks.push(testDeck);
+    
+    const success = await saveToGitHub();
+    displayFolders();
+    
+    if (success) {
+        showMessage('🎉 Test sync successful! Check your GitHub repository.', 'success');
+    }
 }
 
-// Initialize
+// ===== DUMMY FUNCTIONS (for UI compatibility) =====
+function changeFontSize() {}
+function resetFontSize() {}
+function handleSearch() {}
+function clearSearch() {}
+function updatePerformancePanel() {}
+
+// ===== AUTO-LOAD ON PAGE READY =====
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeApp);
+    document.addEventListener('DOMContentLoaded', () => {
+        // Already handled above
+    });
 } else {
-    initializeApp();
+    showMainScreen();
+    loadFromGitHub().then(() => displayFolders());
 }
