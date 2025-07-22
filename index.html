@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MBBS Quiz Master - Premium Edition</title>
+    
+    <!-- PWA Configuration -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="MBBS Quiz">
+    
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- External Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Google Drive API -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Google Sign-In Screen -->
+        <div id="signInScreen" class="screen">
+            <div class="signin-container">
+                <div class="signin-card">
+                    <div class="signin-header">
+                        <div class="app-logo">
+                            <i class="fas fa-graduation-cap"></i>
+                        </div>
+                        <h1>MBBS Quiz Master</h1>
+                        <p class="app-tagline">Premium Medical Education Platform</p>
+                    </div>
+                    
+                    <div class="signin-content">
+                        <div class="feature-list">
+                            <div class="feature-item">
+                                <i class="fas fa-cloud"></i>
+                                <span>Sync across all devices</span>
+                            </div>
+                            <div class="feature-item">
+                                <i class="fas fa-mobile-alt"></i>
+                                <span>Works on mobile & desktop</span>
+                            </div>
+                            <div class="feature-item">
+                                <i class="fas fa-wifi"></i>
+                                <span>Works offline</span>
+                            </div>
+                            <div class="feature-item">
+                                <i class="fas fa-shield-alt"></i>
+                                <span>Secure Google Drive storage</span>
+                            </div>
+                        </div>
+                        
+                        <div class="signin-actions">
+                            <div id="g_id_onload"
+                                 data-client_id="1096906133467-85tvahkfsi7638mc36bcbd3sbskppupn.apps.googleusercontent.com"
+                                 data-callback="handleGoogleSignIn"
+                                 data-auto_prompt="false">
+                            </div>
+                            <div class="g_id_signin" 
+                                 data-type="standard"
+                                 data-size="large"
+                                 data-theme="outline"
+                                 data-text="sign_in_with"
+                                 data-shape="rectangular"
+                                 data-logo_alignment="left">
+                            </div>
+                            
+                            <button onclick="continueOffline()" class="btn btn-secondary btn-large">
+                                <i class="fas fa-play"></i>
+                                Continue Offline
+                            </button>
+                        </div>
+                        
+                        <div class="signin-footer">
+                            <p>Sign in with Google to sync your progress across devices and automatically backup your data.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Screen -->
+        <div id="mainScreen" class="screen hidden">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-left">
+                    <h1><i class="fas fa-graduation-cap"></i> MBBS Quiz Master</h1>
+                    <span class="version-badge">Premium Edition</span>
+                    <div class="sync-status" id="syncStatus">
+                        <i class="fas fa-cloud" id="syncIcon"></i>
+                        <span id="syncText">Offline</span>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="user-info" id="userInfo" style="display: none;">
+                        <img id="userAvatar" class="user-avatar" src="" alt="User">
+                        <span id="userName">User Name</span>
+                        <button onclick="signOut()" class="btn btn-secondary btn-sm">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </button>
+                    </div>
+                    <div class="font-controls">
+                        <span>Font: <span id="fontScale">100</span>%</span>
+                        <button onclick="changeFontSize(-0.1)" class="font-btn"><i class="fas fa-minus"></i></button>
+                        <button onclick="changeFontSize(0.1)" class="font-btn"><i class="fas fa-plus"></i></button>
+                        <button onclick="resetFontSize()" class="font-btn"><i class="fas fa-redo"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="main-content">
+                <!-- Left Panel (File Navigation) -->
+                <div class="left-panel">
+                    <!-- Search Section -->
+                    <div class="search-section">
+                        <div class="search-header">
+                            <i class="fas fa-search"></i>
+                            <h3>Search Questions & Topics</h3>
+                        </div>
+                        <div class="search-input-container">
+                            <input type="text" id="searchInput" placeholder="Search for topics, questions..." oninput="handleSearch()">
+                            <button onclick="clearSearch()" class="clear-search-btn">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Controls Section -->
+                    <div class="controls-section">
+                        <button onclick="createRootFolder()" class="btn btn-success btn-animated">
+                            <i class="fas fa-folder-plus"></i> New Folder
+                        </button>
+                        <button onclick="importDeck()" class="btn btn-primary btn-animated">
+                            <i class="fas fa-file-import"></i> Import Deck
+                        </button>
+                        <input type="file" id="fileInput" accept=".json" style="display: none;" onchange="handleFileImport(event)">
+                    </div>
+
+                    <!-- File Navigator -->
+                    <div class="file-navigator">
+                        <div class="navigator-header">
+                            <i class="fas fa-folder-tree"></i>
+                            <span>File Explorer</span>
+                            <div class="navigator-actions">
+                                <button onclick="expandAll()" title="Expand All" class="nav-action-btn">
+                                    <i class="fas fa-expand-arrows-alt"></i>
+                                </button>
+                                <button onclick="collapseAll()" title="Collapse All" class="nav-action-btn">
+                                    <i class="fas fa-compress-arrows-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="fileTree" class="file-tree"></div>
+                    </div>
+                </div>
+
+                <!-- Right Panel (Performance Dashboard) -->
+                <div class="right-panel">
+                    <div class="performance-dashboard">
+                        <div class="dashboard-header">
+                            <i class="fas fa-chart-pie"></i>
+                            <h3>Performance Dashboard</h3>
+                        </div>
+                        
+                        <!-- Quick Stats Cards -->
+                        <div class="quick-stats">
+                            <div class="stat-card total">
+                                <div class="stat-icon"><i class="fas fa-question-circle"></i></div>
+                                <div class="stat-info">
+                                    <div class="stat-value" id="statTotal">0</div>
+                                    <div class="stat-label">Total Questions</div>
+                                </div>
+                            </div>
+                            <div class="stat-card correct">
+                                <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+                                <div class="stat-info">
+                                    <div class="stat-value" id="statCorrect">0</div>
+                                    <div class="stat-label">Correct</div>
+                                </div>
+                            </div>
+                            <div class="stat-card incorrect">
+                                <div class="stat-icon"><i class="fas fa-times-circle"></i></div>
+                                <div class="stat-info">
+                                    <div class="stat-value" id="statIncorrect">0</div>
+                                    <div class="stat-label">Incorrect</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Performance Chart -->
+                        <div class="chart-container">
+                            <canvas id="performanceChart"></canvas>
+                        </div>
+
+                        <!-- Recent Activity -->
+                        <div class="recent-activity">
+                            <h4><i class="fas fa-clock"></i> Recent Activity</h4>
+                            <div id="activityList" class="activity-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quiz Screen -->
+        <div id="quizScreen" class="screen hidden">
+            <!-- Quiz Header -->
+            <div class="quiz-header">
+                <div class="quiz-header-left">
+                    <button id="bookmarkBtn" onclick="toggleBookmark()" class="quiz-btn bookmark-btn">
+                        <i class="fas fa-bookmark"></i>
+                    </button>
+                    <button onclick="goToMain()" class="quiz-btn home-btn">
+                        <i class="fas fa-home"></i>
+                    </button>
+                </div>
+                
+                <div class="quiz-header-center">
+                    <div class="question-counter" id="questionCounter">Question 1 of 10</div>
+                    <div class="quiz-mode-indicator" id="modeIndicator">
+                        <i class="fas fa-book"></i> Normal Mode
+                    </div>
+                </div>
+                
+                <div class="quiz-header-right">
+                    <div class="quiz-timer">
+                        <i class="fas fa-stopwatch"></i>
+                        <span id="quizTimer">00:00</span>
+                    </div>
+                    <div class="quiz-score">
+                        <span id="currentScore">0/0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quiz Content -->
+            <div class="quiz-content">
+                <!-- Question Panel -->
+                <div class="question-panel">
+                    <div class="question-container">
+                        <div class="question-header">
+                            <div class="question-number">Q<span id="qNumber">1</span></div>
+                        </div>
+                        
+                        <div class="question-content">
+                            <div id="questionText" class="question-text"></div>
+                            <div id="optionsContainer" class="options-container"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Explanation Panel -->
+                <div class="explanation-panel">
+                    <div class="explanation-header">
+                        <i class="fas fa-lightbulb"></i>
+                        <span>Explanation</span>
+                    </div>
+                    <div id="explanationContent" class="explanation-content"></div>
+                </div>
+            </div>
+
+            <!-- Quiz Navigation -->
+            <div class="quiz-navigation">
+                <div class="nav-left">
+                    <button id="prevBtn" onclick="previousQuestion()" class="nav-btn prev-btn">
+                        <i class="fas fa-chevron-left"></i> Previous
+                    </button>
+                </div>
+                
+                <div class="progress-navigation">
+                    <div id="progressButtons" class="progress-buttons"></div>
+                </div>
+                
+                <div class="nav-right">
+                    <button id="nextBtn" onclick="nextQuestion()" class="nav-btn next-btn">
+                        Next <i class="fas fa-chevron-right"></i>
+                    </button>
+                    <button onclick="finishQuiz()" class="nav-btn finish-btn">
+                        <i class="fas fa-flag-checkered"></i> Finish
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Screen -->
+        <div id="resultsScreen" class="screen hidden">
+            <div class="results-container">
+                <div class="results-main">
+                    <!-- Results Header -->
+                    <div class="results-header">
+                        <div class="results-badge">
+                            <div class="badge-icon" id="resultsBadgeIcon">🏆</div>
+                            <div class="badge-text" id="resultsBadgeText">Excellent!</div>
+                        </div>
+                        <h2 id="resultsTitle" class="results-title">Outstanding Performance!</h2>
+                        <div id="resultsScore" class="results-score">95%</div>
+                        <div id="resultsInfo" class="results-info">General Medicine - Fresh Start</div>
+                    </div>
+
+                    <!-- Results Stats -->
+                    <div class="results-stats">
+                        <div class="results-stat">
+                            <div class="stat-icon">✅</div>
+                            <div class="stat-value" id="resultCorrect">8</div>
+                            <div class="stat-label">Correct</div>
+                        </div>
+                        <div class="results-stat">
+                            <div class="stat-icon">❌</div>
+                            <div class="stat-value" id="resultIncorrect">2</div>
+                            <div class="stat-label">Incorrect</div>
+                        </div>
+                        <div class="results-stat">
+                            <div class="stat-icon">⏸️</div>
+                            <div class="stat-value" id="resultUnanswered">0</div>
+                            <div class="stat-label">Unanswered</div>
+                        </div>
+                        <div class="results-stat">
+                            <div class="stat-icon">🔖</div>
+                            <div class="stat-value" id="resultBookmarked">3</div>
+                            <div class="stat-label">Bookmarked</div>
+                        </div>
+                        <div class="results-stat">
+                            <div class="stat-icon">⏱️</div>
+                            <div class="stat-value" id="resultTime">15:30</div>
+                            <div class="stat-label">Time</div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="results-actions">
+                        <button onclick="goToMain()" class="action-btn primary">
+                            <i class="fas fa-home"></i>
+                            <span>Home</span>
+                        </button>
+                        <button onclick="retryQuiz()" class="action-btn success">
+                            <i class="fas fa-redo"></i>
+                            <span>Retry</span>
+                        </button>
+                        <button id="reviewWrongBtn" onclick="reviewWrong()" class="action-btn danger hidden">
+                            <i class="fas fa-times-circle"></i>
+                            <span>Review Incorrect</span>
+                        </button>
+                        <button id="reviewBookmarkedBtn" onclick="reviewBookmarked()" class="action-btn warning hidden">
+                            <i class="fas fa-bookmark"></i>
+                            <span>Review Bookmarked</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="contextMenu" class="context-menu hidden">
+        <div class="context-item" onclick="contextAction('newFolder')">
+            <i class="fas fa-folder-plus"></i> New Folder
+        </div>
+        <div class="context-item" onclick="contextAction('newSubfolder')">
+            <i class="fas fa-folder"></i> New Subfolder
+        </div>
+        <div class="context-divider"></div>
+        <div class="context-item" onclick="contextAction('import')">
+            <i class="fas fa-file-import"></i> Import Deck
+        </div>
+        <div class="context-divider"></div>
+        <div class="context-item" onclick="contextAction('rename')">
+            <i class="fas fa-edit"></i> Rename
+        </div>
+        <div class="context-item danger" onclick="contextAction('delete')">
+            <i class="fas fa-trash"></i> Delete
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="folderModal" class="modal hidden">
+        <div class="modal-backdrop" onclick="closeModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Create New Folder</h3>
+                <button onclick="closeModal()" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="folderNameInput">Folder Name</label>
+                    <input type="text" id="folderNameInput" placeholder="Enter folder name" class="form-input">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeModal()" class="btn btn-secondary">Cancel</button>
+                <button onclick="confirmFolderAction()" class="btn btn-primary" id="confirmBtn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notifications -->
+    <div id="notifications" class="notifications-container"></div>
+
+    <!-- Install Prompt -->
+    <div id="installPrompt" class="install-prompt hidden">
+        <div class="install-content">
+            <div class="install-icon">
+                <i class="fas fa-download"></i>
+            </div>
+            <div class="install-text">
+                <h4>Install MBBS Quiz Master</h4>
+                <p>Install this app for the best experience and offline access</p>
+            </div>
+            <div class="install-actions">
+                <button onclick="installApp()" class="btn btn-primary">Install</button>
+                <button onclick="dismissInstall()" class="btn btn-secondary">Later</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
